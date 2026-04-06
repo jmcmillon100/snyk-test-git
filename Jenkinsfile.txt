@@ -1,0 +1,114 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_DEFAULT_REGION = 'us-east-1'
+        TF_IN_AUTOMATION   = 'true'
+        SNYK_ORG           = credentials('snyk-org-slug')
+    }
+
+    options {
+        ansiColor('xterm')
+        timestamps()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        // Snyk CLI is commented out to skip the initial scan and directly use the Snyk Jenkins plugin for monitoring.
+        // stage('Snyk IaC Scan Test') {
+        //     steps {
+        //         withCredentials([string(credentialsId: 'snyk-api-token-string', variable: 'SNYK_TOKEN')]) {
+        //             sh '''
+        //                 export PATH=$PATH:/var/lib/jenkins/tools/io.snyk.jenkins.tools.SnykInstallation/snyk
+        //                 snyk-linux auth $SNYK_TOKEN
+        //                 snyk-linux iac test --org=$SNYK_ORG --severity-threshold=high || true
+        //             '''
+        //         }
+        //     }
+        // }
+
+        stage('Snyk IaC Scan Monitor') {
+            steps {
+                snykSecurity(
+                    snykInstallation: 'snyk',
+                    snykTokenId: 'snyk-api-token',
+                    additionalArguments: '--iac --report --org=$SNYK_ORG --severity-threshold=high',
+                    failOnIssues: false,
+                    // Turn true to fail the pipeline if issues are found, false to continue and just report the issues in the Snyk dashboard
+                    monitorProjectOnBuild: false
+                )
+            }
+        }
+
+        stage('Terraform Init, Format & Validate') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'armageddon'
+                ]]) {
+                    sh '''
+                        terraform init
+                        terraform fmt -check -recursive
+                        terraform validate
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'armageddon'
+                ]]) {
+                    sh '''
+                        terraform plan -out=tfplan
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'armageddon'
+                ]]) {
+                    sh '''
+                        terraform apply -auto-approve tfplan
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Destroy') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'armageddon'
+                ]]) {
+                    sh '''
+                        terraform destroy -auto-approve
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline execution completed. Review Snyk reports in the Snyk dashboard for any findings.'
+        }
+        success {
+            echo 'Infrastructure deployment completed successfully.'
+        }
+        failure {
+            echo 'Pipeline failed. Please review logs, Terraform plan, and Snyk findings.'
+        }
+    }
+}
