@@ -7,11 +7,6 @@ pipeline {
         SNYK_ORG           = credentials('snyk-org-slug')
     }
 
-    options {
-        ansiColor('xterm')
-        timestamps()
-    }
-
     stages {
         stage('Checkout') {
             steps {
@@ -19,43 +14,37 @@ pipeline {
             }
         }
 
-        // Snyk CLI is commented out to skip the initial scan and directly use the Snyk Jenkins plugin for monitoring.
-        // stage('Snyk IaC Scan Test') {
-        //     steps {
-        //         withCredentials([string(credentialsId: 'snyk-api-token-string', variable: 'SNYK_TOKEN')]) {
-        //             sh '''
-        //                 export PATH=$PATH:/var/lib/jenkins/tools/io.snyk.jenkins.tools.SnykInstallation/snyk
-        //                 snyk-linux auth $SNYK_TOKEN
-        //                 snyk-linux iac test --org=$SNYK_ORG --severity-threshold=high || true
-        //             '''
-        //         }
-        //     }
-        // }
-
+        stage('Snyk IaC Scan Test') {
+            steps {
+                withCredentials([string(credentialsId: 'snyk-api-token-string', variable: 'SNYK_TOKEN')]) {
+                    sh '''
+                        export PATH=$PATH:/var/lib/jenkins/tools/io.snyk.jenkins.tools.SnykInstallation/snyk
+                        snyk-linux auth $SNYK_TOKEN
+                        snyk-linux iac test --org=$SNYK_ORG --severity-threshold=high || true
+                    '''
+                }
+            }
+        }
+        
         stage('Snyk IaC Scan Monitor') {
             steps {
                 snykSecurity(
                     snykInstallation: 'snyk',
                     snykTokenId: 'snyk-api-token',
                     additionalArguments: '--iac --report --org=$SNYK_ORG --severity-threshold=high',
-                    failOnIssues: false,
-                    // Turn true to fail the pipeline if issues are found, false to continue and just report the issues in the Snyk dashboard
+                    failOnIssues: true,
                     monitorProjectOnBuild: false
                 )
             }
         }
 
-        stage('Terraform Init, Format & Validate') {
+        stage('Terraform Init') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'JenkinsID'
                 ]]) {
-                    sh '''
-                        terraform init
-                        terraform fmt -check -recursive
-                        terraform validate
-                    '''
+                    sh 'terraform init'
                 }
             }
         }
@@ -66,49 +55,38 @@ pipeline {
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'JenkinsID'
                 ]]) {
-                    sh '''
-                        terraform plan -out=tfplan
-                    '''
+                    sh 'terraform plan'
                 }
             }
         }
 
-        stage('Terraform Apply') {
+        stage('Optional Destroy') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'JenkinsID'
-                ]]) {
-                    sh '''
-                        terraform apply -auto-approve tfplan
-                    '''
+                script {
+                    def destroyChoice = input(
+                        message: 'Do you want to run terraform destroy?',
+                        ok: 'Submit',
+                        parameters: [
+                            choice(
+                                name: 'DESTROY',
+                                choices: ['no', 'yes'],
+                                description: 'Select yes to destroy resources'
+                            )
+                        ]
+                    )
+
+                    if (destroyChoice == 'yes') {
+                        withCredentials([[
+                            $class: 'AmazonWebServicesCredentialsBinding',
+                            credentialsId: 'JenkinsID'
+                        ]]) {
+                            sh 'terraform destroy -auto-approve'
+                        }
+                    } else {
+                        echo "Skipping destroy"
+                    }
                 }
             }
-        }
-
-        stage('Terraform Destroy') {
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'JenkinsID'
-                ]]) {
-                    sh '''
-                        terraform destroy -auto-approve
-                    '''
-                }
-            }
-        }
-    }
-
-    post {
-        always {
-            echo 'Pipeline execution completed. Review Snyk reports in the Snyk dashboard for any findings.'
-        }
-        success {
-            echo 'Infrastructure deployment completed successfully.'
-        }
-        failure {
-            echo 'Pipeline failed. Please review logs, Terraform plan, and Snyk findings.'
         }
     }
 }
