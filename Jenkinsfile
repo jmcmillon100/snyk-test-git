@@ -13,9 +13,9 @@ pipeline {
                 checkout scm
             }
         }
-
         
-        stage('Snyk IaC Scan Monitor') {
+
+    stage('Snyk IaC Scan Monitor') {
             steps {
                 snykSecurity(
                     snykInstallation: 'snyk',
@@ -27,29 +27,29 @@ pipeline {
             }
         }
 
-        stage('Terraform Init') {
+    stage('Terraform Init') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'JenkinsID'
+                    credentialsId: 'jenkinsTest'
                 ]]) {
                     sh 'terraform init'
                 }
             }
         }
 
-        stage('Terraform Plan') {
+    stage('Terraform Plan') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'JenkinsID'
+                    credentialsId: 'jenkinsTest'
                 ]]) {
                     sh 'terraform plan'
                 }
             }
         }
 
-        stage('Optional Destroy') {
+    stage('Optional Destroy') {
             steps {
                 script {
                     def destroyChoice = input(
@@ -67,7 +67,7 @@ pipeline {
                     if (destroyChoice == 'yes') {
                         withCredentials([[
                             $class: 'AmazonWebServicesCredentialsBinding',
-                            credentialsId: 'JenkinsID'
+                            credentialsId: 'jenkinsTest'
                         ]]) {
                             sh 'terraform destroy -auto-approve'
                         }
