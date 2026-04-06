@@ -13,9 +13,9 @@ pipeline {
                 checkout scm
             }
         }
-        
 
-    stage('Snyk IaC Scan Monitor') {
+        
+        stage('Snyk IaC Scan Monitor') {
             steps {
                 snykSecurity(
                     snykInstallation: 'snyk',
@@ -27,7 +27,7 @@ pipeline {
             }
         }
 
-    stage('Terraform Init') {
+        stage('Terraform Init') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
@@ -38,7 +38,7 @@ pipeline {
             }
         }
 
-    stage('Terraform Plan') {
+        stage('Terraform Plan') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
@@ -49,7 +49,7 @@ pipeline {
             }
         }
 
-    stage('Optional Destroy') {
+        stage('Optional Destroy') {
             steps {
                 script {
                     def destroyChoice = input(
